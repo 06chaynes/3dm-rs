@@ -1,0 +1,6 @@
+[workspace]
+resolver = "2"
+members = [
+    "3dm-rs",
+    "tdm-cli",
+]
