@@ -1,5 +1,5 @@
 [package]
-name = "tdm"
+name = "xml-3dm-cli"
 version = "0.1.0"
 edition = "2021"
 description = "3DM XML Tree Differencing and Merging Tool CLI"

@@ -24,7 +24,7 @@ test-lib:
 
 # Run tests for the CLI
 test-cli:
-    cargo test --package tdm-cli
+    cargo test --package xml-3dm-cli
 
 # Run all tests
 test:

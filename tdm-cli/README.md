@@ -23,7 +23,7 @@ cargo install --path .
 ### From Crates.io
 
 ```bash
-cargo install tdm
+cargo install xml-3dm-cli
 ```
 
 ## Usage
