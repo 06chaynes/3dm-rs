@@ -27,7 +27,8 @@ use std::io::Write;
 use crate::matching::TriMatching;
 use crate::node::base::BaseNode;
 use crate::node::branch::BranchNode;
-use crate::node::{MatchType, NodeRef, XmlContent, XmlElement};
+use crate::node::{new_node_ref, MatchType, NodeInner, NodeRef, XmlContent, XmlElement};
+use crate::xml::XmlPrinter;
 
 /// Operation codes for merge list processing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -50,8 +51,6 @@ pub struct Merge {
     pub conflict_log: ConflictLog,
     /// Log of edit operations performed.
     pub edit_log: EditLog,
-    /// Current indentation level for formatted output.
-    indent: usize,
 }
 
 impl Merge {
@@ -61,7 +60,6 @@ impl Merge {
             matching,
             conflict_log: ConflictLog::new(),
             edit_log: EditLog::new(),
-            indent: 0,
         }
     }
 
@@ -74,28 +72,38 @@ impl Merge {
     ///
     /// The output is written as XML to the provided writer.
     pub fn merge<W: Write>(&mut self, writer: &mut W) -> std::io::Result<()> {
-        // Start document
-        writeln!(writer, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>")?;
+        // Build the merged tree
+        let tree = self.merge_to_tree();
 
-        // Run the tree merge
-        self.tree_merge(
-            Some(self.matching.left_root().clone()),
-            Some(self.matching.right_root().clone()),
-            writer,
-        )?;
-
-        Ok(())
+        // Use XmlPrinter for proper text content handling
+        let mut printer = XmlPrinter::new(writer);
+        printer.print(&tree)
     }
 
-    /// Main recursive merge function.
+    /// Runs the 3-way merge and returns the merged tree.
     ///
-    /// Merges the child lists of a and b, then recurses for each child.
-    fn tree_merge<W: Write>(
-        &mut self,
-        a: Option<NodeRef>,
-        b: Option<NodeRef>,
-        writer: &mut W,
-    ) -> std::io::Result<()> {
+    /// This is useful when you need to programmatically inspect or
+    /// further modify the merge result before output.
+    pub fn merge_to_tree(&mut self) -> NodeRef {
+        // Create synthetic root node
+        let root_content = XmlContent::Element(XmlElement::new(
+            "$ROOT$".to_string(),
+            std::collections::HashMap::new(),
+        ));
+        let root = new_node_ref(NodeInner::new_base(Some(root_content)));
+
+        // Build children recursively
+        self.tree_merge_to_node(
+            Some(self.matching.left_root().clone()),
+            Some(self.matching.right_root().clone()),
+            &root,
+        );
+
+        root
+    }
+
+    /// Recursive tree merge that builds nodes instead of writing output.
+    fn tree_merge_to_node(&mut self, a: Option<NodeRef>, b: Option<NodeRef>, parent: &NodeRef) {
         // Create merge lists for each branch
         let mlist_a = a.as_ref().map(|node| self.make_merge_list(node));
         let mlist_b = b.as_ref().map(|node| self.make_merge_list(node));
@@ -110,63 +118,31 @@ impl Merge {
 
         // Process each merge pair
         for pair in merged.pairs() {
-            let merged_node = self.merge_node_content(pair);
+            let merged_content = self.merge_node_content(pair);
 
-            if let Some(content) = &merged_node {
-                match content {
-                    XmlContent::Text(text) => {
-                        // Output text content (with indentation only if on new line)
-                        let text_str: String = text.text().iter().collect();
-                        write!(
-                            writer,
-                            "{}{}",
-                            Self::indent_str_for(self.indent),
-                            escape_xml_text(&text_str)
-                        )?;
+            if let Some(content) = merged_content {
+                match &content {
+                    XmlContent::Element(elem) if elem.qname() == "$ROOT$" => {
+                        // Skip synthetic root but process children
+                        let partners = self.get_recursion_partners(pair);
+                        self.tree_merge_to_node(partners.first, partners.second, parent);
                     }
-                    XmlContent::Comment(comment) => {
-                        // Output comment
-                        let comment_text: String = comment.text().iter().collect();
-                        writeln!(
-                            writer,
-                            "{}<!-- {} -->",
-                            Self::indent_str_for(self.indent),
-                            comment_text
-                        )?;
-                    }
-                    XmlContent::Element(elem) => {
-                        // Skip synthetic root
-                        if elem.qname() == "$ROOT$" {
+                    _ => {
+                        // Create new node with merged content
+                        let child = new_node_ref(NodeInner::new_base(Some(content.clone())));
+
+                        // Add to parent
+                        NodeInner::add_child_to_ref(parent, child.clone());
+
+                        // Recurse for element children
+                        if let XmlContent::Element(_) = content {
                             let partners = self.get_recursion_partners(pair);
-                            self.tree_merge(partners.first, partners.second, writer)?;
-                        } else {
-                            // Output element start tag
-                            self.write_start_element(writer, elem, self.indent)?;
-
-                            // Increment indent for children
-                            self.indent += 1;
-
-                            // Get recursion partners and recurse
-                            let partners = self.get_recursion_partners(pair);
-                            self.tree_merge(partners.first, partners.second, writer)?;
-
-                            // Decrement indent
-                            self.indent -= 1;
-
-                            // Output end tag
-                            writeln!(
-                                writer,
-                                "{}</{}>",
-                                Self::indent_str_for(self.indent),
-                                elem.qname()
-                            )?;
+                            self.tree_merge_to_node(partners.first, partners.second, &child);
                         }
                     }
                 }
             }
         }
-
-        Ok(())
     }
 
     /// Creates a merge list from the children of a branch node.
@@ -916,54 +892,12 @@ impl Merge {
 
         true
     }
-
-    /// Writes an element start tag.
-    fn write_start_element<W: Write>(
-        &self,
-        writer: &mut W,
-        elem: &XmlElement,
-        indent: usize,
-    ) -> std::io::Result<()> {
-        write!(writer, "{}<{}", Self::indent_str_for(indent), elem.qname())?;
-
-        // Write attributes (sorted for deterministic output)
-        let mut attrs: Vec<(&String, &String)> = elem.attributes().iter().collect();
-        attrs.sort_by(|a, b| a.0.cmp(b.0));
-
-        for (name, value) in attrs {
-            write!(writer, " {}=\"{}\"", name, escape_xml_attr(value))?;
-        }
-
-        writeln!(writer, ">")?;
-        Ok(())
-    }
-
-    /// Returns the indentation string for a given level.
-    fn indent_str_for(level: usize) -> String {
-        "  ".repeat(level)
-    }
 }
 
 /// Partners for recursion.
 struct RecursionPartners {
     first: Option<NodeRef>,
     second: Option<NodeRef>,
-}
-
-/// Escapes special characters in XML text content.
-fn escape_xml_text(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-}
-
-/// Escapes special characters in XML attribute values.
-fn escape_xml_attr(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
 }
 
 impl crate::node::NodeInner {
