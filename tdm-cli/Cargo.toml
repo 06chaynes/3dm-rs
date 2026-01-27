@@ -1,6 +1,6 @@
 [package]
 name = "xml-3dm-cli"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "3DM XML Tree Differencing and Merging Tool CLI"
 license = "LGPL-2.1-or-later"
@@ -16,5 +16,5 @@ name = "tdm"
 path = "src/main.rs"
 
 [dependencies]
-xml-3dm = { version = "0.1.1", path = "../3dm-rs" }
+xml-3dm = { version = "0.1.2", path = "../3dm-rs" }
 clap = { version = "4.5", features = ["derive"] }

@@ -29,9 +29,17 @@ pub const TEXT_THRESHOLD: usize = 5;
 /// Penalty term ($c_p$ in thesis).
 const PENALTY_C: i32 = 20;
 
-/// Q-gram size. Note: In the Java implementation, decideQ() doesn't actually
-/// update this value, so it's effectively always 4. We match that behavior.
-const Q: usize = 4;
+/// Determines Q-gram size based on combined string length (thesis equation 6.1).
+/// Returns q=1 for very short strings, q=2 for medium, q=4 for long.
+fn decide_q(combined_len: usize) -> usize {
+    if combined_len < 5 {
+        1
+    } else if combined_len < 50 {
+        2
+    } else {
+        4
+    }
+}
 
 /// Node similarity measurement calculator.
 ///
@@ -284,15 +292,16 @@ impl Measure {
 
     /// Q-gram distance for strings (Ukkonen92 algorithm).
     fn q_dist_str(&mut self, a: &str, b: &str) -> i32 {
-        // Note: Java's decideQ doesn't actually update Q, so it's always 4
-        // We match that behavior
         self.a_grams.clear();
         self.b_grams.clear();
+
+        // Adaptive Q based on combined length
+        let q = decide_q(a.len() + b.len());
 
         // Build q-grams for string a
         let chars_a: Vec<char> = a.chars().collect();
         for i in 0..chars_a.len() {
-            let end = (i + Q).min(chars_a.len());
+            let end = (i + q).min(chars_a.len());
             let gram: String = chars_a[i..end].iter().collect();
             *self.a_grams.entry(gram).or_insert(0) += 1;
         }
@@ -300,7 +309,7 @@ impl Measure {
         // Build q-grams for string b
         let chars_b: Vec<char> = b.chars().collect();
         for i in 0..chars_b.len() {
-            let end = (i + Q).min(chars_b.len());
+            let end = (i + q).min(chars_b.len());
             let gram: String = chars_b[i..end].iter().collect();
             *self.b_grams.entry(gram).or_insert(0) += 1;
         }
@@ -313,16 +322,19 @@ impl Measure {
         self.a_grams.clear();
         self.b_grams.clear();
 
+        // Adaptive Q based on combined length
+        let q = decide_q(a.len() + b.len());
+
         // Build q-grams for array a
         for i in 0..a.len() {
-            let end = (i + Q).min(a.len());
+            let end = (i + q).min(a.len());
             let gram: String = a[i..end].iter().collect();
             *self.a_grams.entry(gram).or_insert(0) += 1;
         }
 
         // Build q-grams for array b
         for i in 0..b.len() {
-            let end = (i + Q).min(b.len());
+            let end = (i + q).min(b.len());
             let gram: String = b[i..end].iter().collect();
             *self.b_grams.entry(gram).or_insert(0) += 1;
         }
@@ -332,12 +344,14 @@ impl Measure {
 
     /// Builds Q-grams from a string into the provided map.
     /// Used by tests to verify Q-gram construction.
+    /// Assumes comparing string to itself (combined_len = 2 * len).
     #[cfg(test)]
     fn build_q_grams_str(&self, s: &str, grams: &mut HashMap<String, i32>) {
         grams.clear();
         let chars: Vec<char> = s.chars().collect();
+        let q = decide_q(chars.len() * 2);
         for i in 0..chars.len() {
-            let end = (i + Q).min(chars.len());
+            let end = (i + q).min(chars.len());
             let gram: String = chars[i..end].iter().collect();
             *grams.entry(gram).or_insert(0) += 1;
         }
@@ -670,10 +684,11 @@ mod tests {
         let mut grams = StdHashMap::new();
         measure.build_q_grams_str("hello", &mut grams);
 
-        // With Q=4, "hello" should produce grams: "hell", "ello", "llo", "lo", "o"
-        assert!(grams.contains_key("hell"));
-        assert!(grams.contains_key("ello"));
-        assert!(grams.contains_key("llo"));
+        // "hello" (len=5) comparing to itself → combined=10 → Q=2
+        // Should produce 2-grams: "he", "el", "ll", "lo", "o"
+        assert!(grams.contains_key("he"));
+        assert!(grams.contains_key("el"));
+        assert!(grams.contains_key("ll"));
         assert!(grams.contains_key("lo"));
         assert!(grams.contains_key("o"));
     }
