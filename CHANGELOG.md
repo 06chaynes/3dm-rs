@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-01-26
+
+### Added
+
+- **`--pretty` CLI flag**: New `-p, --pretty` option for `tdm merge` command that outputs XML with 2-space indentation. Useful for human-readable merge results and Git merge driver configuration.
+
+- **`XmlPrinterOptions` export**: Exposed `XmlPrinterOptions` from the library for programmatic control over XML output formatting.
+
 ## [0.1.3] - 2026-01-26
 
 ### Fixed

@@ -7,6 +7,7 @@ A Rust implementation of the 3DM (3-way Diff/Merge) algorithm for XML document p
 3DM-RS provides a library (`xml-3dm`) and CLI tool (`tdm`) for structure-aware XML operations. The implementation operates on XML tree structure rather than text lines.
 
 **Capabilities:**
+
 - 3-way merge: Combine changes from two branches relative to a common ancestor
 - Diff generation: Create compact diff representations with copy detection
 - Patch application: Apply diffs to reconstruct modified documents
@@ -76,6 +77,7 @@ See [3dm-rs/README.md](3dm-rs/README.md) for library documentation.
 Consider a document being edited by two people:
 
 **Original (base.xml):**
+
 ```xml
 <document>
   <section id="intro">
@@ -88,6 +90,7 @@ Consider a document being edited by two people:
 **Bob's edits:** Fixes the typo "introduciton" → "introduction"
 
 **3DM Result:**
+
 ```xml
 <document>
   <section id="overview">
@@ -181,6 +184,12 @@ Configure `tdm` as a Git merge driver:
 
 # In .gitattributes
 *.xml merge=xml3dm
+```
+
+For pretty-printed output with indentation, add the `--pretty` flag:
+
+```bash
+driver = tdm merge --pretty %O %A %B %A
 ```
 
 ## Limitations

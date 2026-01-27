@@ -1,6 +1,6 @@
 [package]
 name = "xml-3dm"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 description = "3-way XML diff and merge tool"
 license = "LGPL-2.1-or-later"

@@ -8,7 +8,7 @@ use std::io::{self, BufWriter, Write};
 use clap::{Parser, Subcommand};
 use xml_3dm::{
     BaseNodeFactory, BranchNodeFactory, Diff, DiffMatching, Matching, Merge, Patch, TriMatching,
-    XmlParser,
+    XmlParser, XmlPrinter, XmlPrinterOptions,
 };
 
 /// 3DM XML Tree Differencing and Merging Tool
@@ -38,6 +38,10 @@ enum Commands {
         /// Threshold for considering duplicate structure as a copy (bytes)
         #[arg(short = 'c', long, default_value = "128")]
         copythreshold: usize,
+
+        /// Pretty-print output with indentation
+        #[arg(short = 'p', long)]
+        pretty: bool,
     },
 
     /// Generate a diff between base and branch
@@ -73,7 +77,15 @@ fn main() -> std::process::ExitCode {
             branch2,
             output,
             copythreshold,
-        } => run_merge(&base, &branch1, &branch2, output.as_deref(), copythreshold),
+            pretty,
+        } => run_merge(
+            &base,
+            &branch1,
+            &branch2,
+            output.as_deref(),
+            copythreshold,
+            pretty,
+        ),
         Commands::Diff {
             base,
             branch,
@@ -102,6 +114,7 @@ fn run_merge(
     branch2_path: &str,
     output_path: Option<&str>,
     copy_threshold: usize,
+    pretty: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Parse input files
     let base_parser = XmlParser::new(BaseNodeFactory);
@@ -126,6 +139,7 @@ fn run_merge(
 
     // Run merge
     let mut merge = Merge::new(tri_matching);
+    let tree = merge.merge_to_tree();
 
     // Get output writer
     let mut output: Box<dyn Write> = match output_path {
@@ -133,7 +147,12 @@ fn run_merge(
         None => Box::new(io::stdout()),
     };
 
-    merge.merge(&mut output)?;
+    // Print with optional pretty formatting
+    let options = XmlPrinterOptions {
+        pretty_print: pretty,
+    };
+    let mut printer = XmlPrinter::with_options(&mut output, options);
+    printer.print(&tree)?;
 
     // Report conflicts if any
     let num_conflicts = merge.conflict_log.conflicts().len();

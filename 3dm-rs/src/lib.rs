@@ -43,6 +43,7 @@ pub use node::{
 };
 pub use xml::{
     parse_file, parse_str, BaseNodeFactory, BranchNodeFactory, NodeFactory, XmlParser, XmlPrinter,
+    XmlPrinterOptions,
 };
 
 // Re-export merge types

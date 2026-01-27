@@ -44,9 +44,10 @@ tdm m base.xml branch1.xml branch2.xml
 
 **Options:**
 
-- `-c, --copy-threshold <BYTES>`: Minimum size for copy detection (default: 128)
+- `-c, --copythreshold <BYTES>`: Minimum size for copy detection (default: 128)
   - Set to 0 to disable copy detection
   - Increase for larger documents to reduce false positives
+- `-p, --pretty`: Pretty-print output with 2-space indentation
 
 ### Diff Generation
 
@@ -191,6 +192,15 @@ Configure `tdm` as a Git merge driver:
 
 # In .gitattributes
 *.xml merge=xml3dm
+```
+
+For pretty-printed output with indentation:
+
+```bash
+[merge "xml3dm"]
+    name = 3DM XML merge driver
+    driver = tdm merge --pretty %O %A %B %A
+    recursive = binary
 ```
 
 ## License

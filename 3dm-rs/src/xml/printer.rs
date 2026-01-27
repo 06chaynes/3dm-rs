@@ -184,15 +184,21 @@ impl<W: Write> XmlPrinter<W> {
             self.print_with_nl(" />")?;
         } else {
             // Has content - print closing tag
-            if self.state == PrintState::AfterTag && !self.options.pretty_print {
-                writeln!(self.writer)?;
-            }
-
             let close_tag = format!("</{}>", qname);
-            if self.options.pretty_print {
-                write!(self.writer, "{}", &Self::indent_str(self.indent))?;
+
+            if self.state == PrintState::AfterChars {
+                // Text content - closing tag goes inline (no indent, no preceding newline)
+                self.print_with_nl(&close_tag)?;
+            } else {
+                // Child elements - closing tag on new line with indent
+                if !self.options.pretty_print {
+                    writeln!(self.writer)?;
+                }
+                if self.options.pretty_print {
+                    write!(self.writer, "{}", &Self::indent_str(self.indent))?;
+                }
+                self.print_with_nl(&close_tag)?;
             }
-            self.print_with_nl(&close_tag)?;
         }
 
         // Pop state
@@ -207,7 +213,7 @@ impl<W: Write> XmlPrinter<W> {
 
         // Close previous unclosed tag if needed
         if !self.has_content {
-            self.print_with_nl(">")?;
+            write!(self.writer, ">")?;
         }
         self.has_content = true;
 
@@ -216,7 +222,8 @@ impl<W: Write> XmlPrinter<W> {
         }
 
         let encoded = to_entities(text);
-        self.print_with_nl(&encoded)
+        // Text content should not have newlines added - keep it inline
+        write!(self.writer, "{}", encoded)
     }
 
     fn print_with_nl(&mut self, s: &str) -> std::io::Result<()> {
