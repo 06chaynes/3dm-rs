@@ -11,8 +11,8 @@ use crate::node::{BranchNode, NodeRef, XmlContent};
 use super::bfs_index::BfsIndex;
 use super::diff_operation::{DiffOpType, DiffOperation};
 use super::{
-    DIFF_COPY_TAG, DIFF_CPYDST_ATTR, DIFF_CPYRUN_ATTR, DIFF_CPYSRC_ATTR, DIFF_INSERT_TAG,
-    DIFF_ROOTOP_ATTR, DIFF_ROOTOP_INS, DIFF_ROOT_TAG,
+    DIFF_COPY_TAG, DIFF_CPYDST_ATTR, DIFF_CPYRUN_ATTR, DIFF_CPYSRC_ATTR, DIFF_ESC_TAG,
+    DIFF_INSERT_TAG, DIFF_ROOTOP_ATTR, DIFF_ROOTOP_INS, DIFF_ROOT_TAG,
 };
 
 /// Sequence for run-length encoding of consecutive copies.
@@ -340,6 +340,14 @@ impl<'a> Diff<'a> {
         Ok(())
     }
 
+    /// Checks if an element name conflicts with diff reserved tags.
+    fn needs_escape(qname: &str) -> bool {
+        qname == DIFF_COPY_TAG
+            || qname == DIFF_INSERT_TAG
+            || qname == DIFF_ESC_TAG
+            || qname == DIFF_ROOT_TAG
+    }
+
     /// Writes the opening content for a node.
     fn write_content_open<W: Write>(&self, writer: &mut W, node: &NodeRef) -> std::io::Result<()> {
         let borrowed = node.borrow();
@@ -365,6 +373,18 @@ impl<'a> Diff<'a> {
                 )?;
             }
             Some(XmlContent::Element(elem)) => {
+                // Check if element name conflicts with diff reserved tags
+                let needs_esc = Self::needs_escape(elem.qname());
+                if needs_esc {
+                    writeln!(
+                        writer,
+                        "{}<{}>",
+                        Self::indent_str_for(self.indent.get()),
+                        DIFF_ESC_TAG
+                    )?;
+                    self.indent.set(self.indent.get() + 1);
+                }
+
                 write!(
                     writer,
                     "{}<{}",
@@ -398,6 +418,17 @@ impl<'a> Diff<'a> {
                 Self::indent_str_for(self.indent.get()),
                 elem.qname()
             )?;
+
+            // Close escape wrapper if element name was reserved
+            if Self::needs_escape(elem.qname()) {
+                self.indent.set(self.indent.get() - 1);
+                writeln!(
+                    writer,
+                    "{}</{}>",
+                    Self::indent_str_for(self.indent.get()),
+                    DIFF_ESC_TAG
+                )?;
+            }
         }
         Ok(())
     }

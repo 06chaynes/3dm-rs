@@ -1,6 +1,6 @@
 [package]
 name = "xml-3dm"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "3-way XML diff and merge tool"
 license = "LGPL-2.1-or-later"
@@ -13,11 +13,11 @@ keywords = ["xml", "diff", "merge", "3dm", "tree-diff"]
 categories = ["algorithms", "text-processing"]
 
 [dependencies]
-quick-xml = "0.38"
+quick-xml = "0.39"
 md-5 = "0.10"
 thiserror = "2.0"
-bitflags = "2.4"
+bitflags = "2.10"
 
 [dev-dependencies]
-tempfile = "3.9"
+tempfile = "3.24"
 pretty_assertions = "1.4"

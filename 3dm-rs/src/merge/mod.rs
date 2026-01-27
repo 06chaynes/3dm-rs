@@ -540,10 +540,35 @@ impl Merge {
     }
 
     /// Checks for movef-movef conflict.
-    fn is_movef_movef_conflict(&self, _bn: &NodeRef) -> bool {
-        // Simplified implementation - check if moved under non-matching parents
-        // Full implementation would check if parents match structurally
-        false
+    ///
+    /// A MoveF-MoveF conflict occurs when both branches move the same base node
+    /// to different parent locations. Returns true if the parents differ (conflict).
+    fn is_movef_movef_conflict(&self, bn: &NodeRef) -> bool {
+        // Get left/right branch copies of base node
+        let left_node = BaseNode::left(bn).borrow().full_match();
+        let right_node = BaseNode::right(bn).borrow().full_match();
+
+        let (left_node, right_node) = match (left_node, right_node) {
+            (Some(l), Some(r)) => (l, r),
+            _ => return false,
+        };
+
+        // Get parents
+        let left_parent = BranchNode::parent(&left_node);
+        let right_parent = BranchNode::parent(&right_node);
+
+        match (left_parent, right_parent) {
+            (Some(lp), Some(rp)) => {
+                let lp_base = BranchNode::base_match(&lp);
+                let rp_base = BranchNode::base_match(&rp);
+                match (lp_base, rp_base) {
+                    (Some(lb), Some(rb)) => lb.borrow().id() != rb.borrow().id(),
+                    _ => true, // Inserted parent = conflict
+                }
+            }
+            (None, None) => false, // Both at root
+            _ => true,             // One at root, one not
+        }
     }
 
     /// Merges the content of nodes in a merge pair.
