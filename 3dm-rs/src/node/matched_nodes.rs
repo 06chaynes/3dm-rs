@@ -3,8 +3,8 @@
 //! A `MatchedNodes` container holds references to branch nodes that are
 //! matched to a specific base node.
 
+use rustc_hash::FxHashSet;
 use std::cell::RefCell;
-use std::collections::HashSet;
 use std::rc::{Rc, Weak};
 
 use super::{NodeInner, NodeRef};
@@ -22,7 +22,7 @@ pub struct MatchedNodes {
     /// Weak reference to the owner base node.
     owner: WeakNodeRef,
     /// Set of matched branch node IDs.
-    match_ids: HashSet<u64>,
+    match_ids: FxHashSet<u64>,
     /// Strong references to matched branch nodes, keyed by node ID.
     /// We keep these to prevent nodes from being dropped.
     matches: Vec<NodeRef>,
@@ -36,7 +36,7 @@ impl MatchedNodes {
     pub fn new(owner: WeakNodeRef) -> Self {
         MatchedNodes {
             owner,
-            match_ids: HashSet::new(),
+            match_ids: FxHashSet::default(),
             matches: Vec::new(),
         }
     }
@@ -110,7 +110,7 @@ impl Default for MatchedNodes {
     fn default() -> Self {
         MatchedNodes {
             owner: Weak::new(),
-            match_ids: HashSet::new(),
+            match_ids: FxHashSet::default(),
             matches: Vec::new(),
         }
     }

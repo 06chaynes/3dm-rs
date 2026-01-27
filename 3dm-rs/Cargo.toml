@@ -1,6 +1,6 @@
 [package]
 name = "xml-3dm"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 description = "3-way XML diff and merge tool"
 license = "LGPL-2.1-or-later"
@@ -17,6 +17,7 @@ quick-xml = "0.39"
 md-5 = "0.10"
 thiserror = "2.0"
 bitflags = "2.10"
+rustc-hash = "2.1"
 
 [dev-dependencies]
 tempfile = "3.24"

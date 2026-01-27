@@ -4,7 +4,7 @@
 //! distance algorithm (Ukkonen92). It calculates content distance, child list
 //! distance, and matched child list distance between nodes.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::node::{NodeRef, XmlContent};
 
@@ -53,8 +53,8 @@ pub struct Measure {
     /// Set to true if total mismatch occurs (e.g., text and element node compared).
     total_mismatch: bool,
     /// Hash tables used to store Q-grams.
-    a_grams: HashMap<String, i32>,
-    b_grams: HashMap<String, i32>,
+    a_grams: FxHashMap<String, i32>,
+    b_grams: FxHashMap<String, i32>,
 }
 
 impl Default for Measure {
@@ -70,8 +70,8 @@ impl Measure {
             mismatched: 0,
             total: 0,
             total_mismatch: false,
-            a_grams: HashMap::with_capacity(2048),
-            b_grams: HashMap::with_capacity(2048),
+            a_grams: FxHashMap::with_capacity_and_hasher(2048, Default::default()),
+            b_grams: FxHashMap::with_capacity_and_hasher(2048, Default::default()),
         }
     }
 
@@ -346,7 +346,7 @@ impl Measure {
     /// Used by tests to verify Q-gram construction.
     /// Assumes comparing string to itself (combined_len = 2 * len).
     #[cfg(test)]
-    fn build_q_grams_str(&self, s: &str, grams: &mut HashMap<String, i32>) {
+    fn build_q_grams_str(&self, s: &str, grams: &mut FxHashMap<String, i32>) {
         grams.clear();
         let chars: Vec<char> = s.chars().collect();
         let q = decide_q(chars.len() * 2);
@@ -681,7 +681,7 @@ mod tests {
     #[test]
     fn test_q_grams_built_correctly() {
         let measure = Measure::new();
-        let mut grams = StdHashMap::new();
+        let mut grams: FxHashMap<String, i32> = FxHashMap::default();
         measure.build_q_grams_str("hello", &mut grams);
 
         // "hello" (len=5) comparing to itself → combined=10 → Q=2
