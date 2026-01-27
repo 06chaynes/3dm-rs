@@ -7,6 +7,8 @@ use crate::constants::{ATTR_INFO, ATTR_VALUE_THRESHOLD, ELEMENT_NAME_INFO, TEXT_
 use md5::{Digest, Md5};
 use std::collections::HashMap;
 
+use super::namespace::ExpandedName;
+
 /// Represents the content of an XML node.
 #[derive(Debug, Clone)]
 pub enum XmlContent {
@@ -16,6 +18,8 @@ pub enum XmlContent {
     Text(XmlText),
     /// XML comment.
     Comment(XmlComment),
+    /// XML processing instruction.
+    ProcessingInstruction(XmlProcessingInstruction),
 }
 
 impl XmlContent {
@@ -27,6 +31,7 @@ impl XmlContent {
             XmlContent::Element(e) => e.info_size,
             XmlContent::Text(t) => t.info_size,
             XmlContent::Comment(c) => c.info_size,
+            XmlContent::ProcessingInstruction(pi) => pi.info_size,
         }
     }
 
@@ -36,6 +41,9 @@ impl XmlContent {
             (XmlContent::Element(a), XmlContent::Element(b)) => a.content_equals(b),
             (XmlContent::Text(a), XmlContent::Text(b)) => a.content_equals(b),
             (XmlContent::Comment(a), XmlContent::Comment(b)) => a.content_equals(b),
+            (XmlContent::ProcessingInstruction(a), XmlContent::ProcessingInstruction(b)) => {
+                a.content_equals(b)
+            }
             _ => false,
         }
     }
@@ -48,6 +56,7 @@ impl XmlContent {
             XmlContent::Element(e) => e.content_hash(),
             XmlContent::Text(t) => t.content_hash(),
             XmlContent::Comment(c) => c.content_hash(),
+            XmlContent::ProcessingInstruction(pi) => pi.content_hash(),
         }
     }
 
@@ -64,6 +73,11 @@ impl XmlContent {
     /// Returns true if this is a comment node.
     pub fn is_comment(&self) -> bool {
         matches!(self, XmlContent::Comment(_))
+    }
+
+    /// Returns true if this is a processing instruction node.
+    pub fn is_processing_instruction(&self) -> bool {
+        matches!(self, XmlContent::ProcessingInstruction(_))
     }
 
     /// Returns a reference to the element, if this is an element node.
@@ -94,6 +108,14 @@ impl XmlContent {
     pub fn as_text_mut(&mut self) -> Option<&mut XmlText> {
         match self {
             XmlContent::Text(t) => Some(t),
+            _ => None,
+        }
+    }
+
+    /// Returns a reference to the PI, if this is a processing instruction node.
+    pub fn as_processing_instruction(&self) -> Option<&XmlProcessingInstruction> {
+        match self {
+            XmlContent::ProcessingInstruction(pi) => Some(pi),
             _ => None,
         }
     }
@@ -147,6 +169,10 @@ fn hash_to_i32(hash: &[u8; 16]) -> i32 {
 pub struct XmlElement {
     /// The qualified name of the element (e.g., "div", "ns:element").
     name: String,
+    /// The expanded name (namespace URI + local name), if parsed with namespace awareness.
+    expanded_name: Option<ExpandedName>,
+    /// Namespace declarations on this element (prefix -> URI).
+    namespace_decls: HashMap<String, String>,
     /// Attributes as key-value pairs. The key is the qualified attribute name.
     attributes: HashMap<String, String>,
     /// Cached hash code of the element name (matches Java's String.hashCode()).
@@ -160,8 +186,20 @@ pub struct XmlElement {
 impl XmlElement {
     /// Creates a new XML element with the given name and attributes.
     pub fn new(name: String, attributes: HashMap<String, String>) -> Self {
+        Self::new_with_namespace(name, None, HashMap::new(), attributes)
+    }
+
+    /// Creates a new element with namespace information.
+    pub fn new_with_namespace(
+        name: String,
+        expanded_name: Option<ExpandedName>,
+        namespace_decls: HashMap<String, String>,
+        attributes: HashMap<String, String>,
+    ) -> Self {
         let mut element = XmlElement {
             name,
+            expanded_name,
+            namespace_decls,
             attributes,
             name_hash: 0,
             attr_hash: [0; 16],
@@ -237,9 +275,37 @@ impl XmlElement {
         self.attributes = attributes;
     }
 
+    /// Returns the expanded name, if available.
+    pub fn expanded_name(&self) -> Option<&ExpandedName> {
+        self.expanded_name.as_ref()
+    }
+
+    /// Returns namespace declarations on this element.
+    pub fn namespace_decls(&self) -> &HashMap<String, String> {
+        &self.namespace_decls
+    }
+
+    /// Compares element names with namespace awareness.
+    /// Falls back to string comparison if neither has expanded names.
+    pub fn names_match(&self, other: &XmlElement) -> bool {
+        match (&self.expanded_name, &other.expanded_name) {
+            (Some(a), Some(b)) => a == b,
+            (None, None) => self.name == other.name,
+            _ => false,
+        }
+    }
+
     /// Tests content equality using hash comparison.
+    ///
+    /// Note: This compares element name and attributes only, not namespace
+    /// declarations. Use `namespace_decls_equal` for namespace comparison.
     pub fn content_equals(&self, other: &XmlElement) -> bool {
         self.name_hash == other.name_hash && self.attr_hash == other.attr_hash
+    }
+
+    /// Tests whether namespace declarations are equal.
+    pub fn namespace_decls_equal(&self, other: &XmlElement) -> bool {
+        self.namespace_decls == other.namespace_decls
     }
 
     /// Returns a 32-bit hash code for this element.
@@ -417,6 +483,79 @@ impl std::fmt::Display for XmlComment {
     }
 }
 
+/// XML processing instruction content.
+#[derive(Debug, Clone)]
+pub struct XmlProcessingInstruction {
+    /// The target of the PI (e.g., "xml-stylesheet").
+    target: String,
+    /// The content/data of the PI (everything after the target).
+    content: String,
+    /// MD5 hash of combined target and content.
+    content_hash: [u8; 16],
+    /// Information size metric (PIs have minimal info size like comments).
+    info_size: i32,
+}
+
+impl XmlProcessingInstruction {
+    /// Creates a new PI from target and content strings.
+    pub fn new(target: &str, content: &str) -> Self {
+        let content_hash = Self::calculate_hash(target, content);
+        XmlProcessingInstruction {
+            target: target.to_string(),
+            content: content.to_string(),
+            content_hash,
+            info_size: 1,
+        }
+    }
+
+    fn calculate_hash(target: &str, content: &str) -> [u8; 16] {
+        use md5::{Digest, Md5};
+        let mut hasher = Md5::new();
+        for code in target.encode_utf16() {
+            hasher.update([(code & 0xff) as u8, (code >> 8) as u8]);
+        }
+        for code in content.encode_utf16() {
+            hasher.update([(code & 0xff) as u8, (code >> 8) as u8]);
+        }
+        hasher.finalize().into()
+    }
+
+    /// Tests content equality using MD5 hash comparison.
+    pub fn content_equals(&self, other: &XmlProcessingInstruction) -> bool {
+        self.content_hash == other.content_hash
+    }
+
+    /// Returns the PI target.
+    pub fn target(&self) -> &str {
+        &self.target
+    }
+
+    /// Returns the PI content.
+    pub fn content(&self) -> &str {
+        &self.content
+    }
+
+    /// Returns a 32-bit hash code for this PI node.
+    pub fn content_hash(&self) -> i32 {
+        hash_to_i32(&self.content_hash)
+    }
+
+    /// Returns the information size.
+    pub fn info_size(&self) -> i32 {
+        self.info_size
+    }
+}
+
+impl std::fmt::Display for XmlProcessingInstruction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.content.is_empty() {
+            write!(f, "<?{}?>", self.target)
+        } else {
+            write!(f, "<?{} {}?>", self.target, self.content)
+        }
+    }
+}
+
 /// Computes a hash code compatible with Java's String.hashCode().
 ///
 /// Java's algorithm: `s[0]*31^(n-1) + s[1]*31^(n-2) + ... + s[n-1]`
@@ -510,5 +649,29 @@ mod tests {
         assert!(elem.as_text().is_none());
         assert!(text.as_text().is_some());
         assert!(text.as_element().is_none());
+    }
+
+    #[test]
+    fn test_namespace_decls_affect_equality() {
+        let attrs = HashMap::new();
+
+        let mut ns1 = HashMap::new();
+        ns1.insert("a".to_string(), "http://example.com/a".to_string());
+
+        let mut ns2 = HashMap::new();
+        ns2.insert("b".to_string(), "http://example.com/b".to_string());
+
+        let e1 = XmlElement::new_with_namespace("root".to_string(), None, ns1, attrs.clone());
+        let e2 = XmlElement::new_with_namespace("root".to_string(), None, ns2, attrs.clone());
+        let e3 = XmlElement::new("root".to_string(), attrs);
+
+        // content_equals ignores namespace declarations (intentional)
+        assert!(e1.content_equals(&e2));
+        assert!(e1.content_equals(&e3));
+
+        // namespace_decls_equal detects namespace differences
+        assert!(!e1.namespace_decls_equal(&e2));
+        assert!(!e1.namespace_decls_equal(&e3));
+        assert!(e1.namespace_decls_equal(&e1));
     }
 }

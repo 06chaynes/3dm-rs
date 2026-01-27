@@ -8,13 +8,17 @@ pub mod base;
 pub mod branch;
 mod match_area;
 mod matched_nodes;
+pub mod namespace;
 mod xml_content;
 
 pub use base::BaseNode;
 pub use branch::BranchNode;
 pub use match_area::{MatchArea, WeakNodeRef};
 pub use matched_nodes::MatchedNodes;
-pub use xml_content::{java_string_hash, XmlComment, XmlContent, XmlElement, XmlText};
+pub use namespace::{is_xmlns_attr, split_qname, ExpandedName, NamespaceContext};
+pub use xml_content::{
+    java_string_hash, XmlComment, XmlContent, XmlElement, XmlProcessingInstruction, XmlText,
+};
 
 use bitflags::bitflags;
 use std::cell::RefCell;

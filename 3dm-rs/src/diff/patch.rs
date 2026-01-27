@@ -337,8 +337,39 @@ impl Patch {
                     comment_text
                 )?;
             }
+            Some(XmlContent::ProcessingInstruction(pi)) => {
+                // Output processing instruction
+                if pi.content().is_empty() {
+                    writeln!(
+                        writer,
+                        "{}<?{}?>",
+                        Self::indent_str_for(indent),
+                        pi.target()
+                    )?;
+                } else {
+                    writeln!(
+                        writer,
+                        "{}<?{} {}?>",
+                        Self::indent_str_for(indent),
+                        pi.target(),
+                        pi.content()
+                    )?;
+                }
+            }
             Some(XmlContent::Element(elem)) => {
                 write!(writer, "{}<{}", Self::indent_str_for(indent), elem.qname())?;
+                // Namespace declarations (sorted for deterministic output)
+                let mut ns_prefixes: Vec<_> = elem.namespace_decls().keys().collect();
+                ns_prefixes.sort();
+                for prefix in ns_prefixes {
+                    if let Some(uri) = elem.namespace_decls().get(prefix) {
+                        if prefix.is_empty() {
+                            write!(writer, " xmlns=\"{}\"", escape_xml_attr(uri))?;
+                        } else {
+                            write!(writer, " xmlns:{}=\"{}\"", prefix, escape_xml_attr(uri))?;
+                        }
+                    }
+                }
                 // Sort attributes for consistent output
                 let mut attr_names: Vec<_> = elem.attributes().keys().collect();
                 attr_names.sort();

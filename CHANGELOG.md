@@ -7,9 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.5] - 2026-01-27
 
+### Added
+
+- **Processing instruction support**: XML processing instructions (e.g., `<?xml-stylesheet href="style.css"?>`) are now preserved through parsing, diff, merge, and output.
+
+- **Namespace-aware element comparison**: Elements are now compared by expanded name (namespace URI + local name) rather than prefixed string. Namespace declarations (`xmlns`, `xmlns:prefix`) are tracked separately from attributes and preserved in output.
+
+- **Whitespace preservation**: Added support for `xml:space="preserve"` attribute. Elements with this attribute (or inheriting it) retain all whitespace in text content during parsing.
+
 ### Changed
 
 - **FxHash for internal hash tables**: Replaced `std::collections::HashMap` and `HashSet` with `rustc-hash` FxHash variants in Q-gram distance calculation and node matching. Provides faster hashing for the string and integer keys used internally.
+
+### Fixed
+
+- **Comment text flushing**: Text content preceding a comment node is now correctly flushed as a separate text node, preserving document ordering.
 
 ## [0.1.4] - 2026-01-26
 

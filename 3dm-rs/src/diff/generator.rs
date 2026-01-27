@@ -141,9 +141,11 @@ impl<'a> Diff<'a> {
             let dst = BranchNode::base_match(stop_node).and_then(|n| self.index.get_id(&n));
 
             if !self.emit_child_list(writer, &mut seq, stop_node, dst, false)? {
-                // Empty insert tag for nodes with no children
+                // Leaf node (e.g. PI, comment, text) with no children
                 let op = DiffOperation::insert(dst);
                 self.write_op_open(writer, &op)?;
+                self.write_content_open(writer, stop_node)?;
+                self.write_content_close(writer, stop_node)?;
                 self.write_op_close(writer, &op)?;
             }
         }
@@ -372,6 +374,25 @@ impl<'a> Diff<'a> {
                     comment_text
                 )?;
             }
+            Some(XmlContent::ProcessingInstruction(pi)) => {
+                // Output processing instruction
+                if pi.content().is_empty() {
+                    writeln!(
+                        writer,
+                        "{}<?{}?>",
+                        Self::indent_str_for(self.indent.get()),
+                        pi.target()
+                    )?;
+                } else {
+                    writeln!(
+                        writer,
+                        "{}<?{} {}?>",
+                        Self::indent_str_for(self.indent.get()),
+                        pi.target(),
+                        pi.content()
+                    )?;
+                }
+            }
             Some(XmlContent::Element(elem)) => {
                 // Check if element name conflicts with diff reserved tags
                 let needs_esc = Self::needs_escape(elem.qname());
@@ -391,7 +412,19 @@ impl<'a> Diff<'a> {
                     Self::indent_str_for(self.indent.get()),
                     elem.qname()
                 )?;
-                // Attributes is HashMap<String, String>
+                // Namespace declarations (sorted for deterministic output)
+                let mut ns_prefixes: Vec<_> = elem.namespace_decls().keys().collect();
+                ns_prefixes.sort();
+                for prefix in ns_prefixes {
+                    if let Some(uri) = elem.namespace_decls().get(prefix) {
+                        if prefix.is_empty() {
+                            write!(writer, " xmlns=\"{}\"", escape_xml_attr(uri))?;
+                        } else {
+                            write!(writer, " xmlns:{}=\"{}\"", prefix, escape_xml_attr(uri))?;
+                        }
+                    }
+                }
+                // Attributes (sorted for deterministic output)
                 let mut attr_names: Vec<_> = elem.attributes().keys().collect();
                 attr_names.sort();
                 for name in attr_names {
@@ -458,7 +491,9 @@ fn escape_xml_attr(s: &str) -> String {
 mod tests {
     use super::*;
     use crate::matching::HeuristicMatching;
-    use crate::node::{new_base_node, new_branch_node, NodeInner, XmlElement};
+    use crate::node::{
+        new_base_node, new_branch_node, NodeInner, XmlContent, XmlElement, XmlProcessingInstruction,
+    };
     use std::collections::HashMap;
 
     #[test]
@@ -509,6 +544,50 @@ mod tests {
             let result = String::from_utf8(output).unwrap();
             assert!(result.contains("<diff>"));
             assert!(result.contains("</diff>"));
+        }
+    }
+
+    #[test]
+    fn test_diff_pi_insertion() {
+        // Base: $ROOT$ -> root element (no PI)
+        let base = new_base_node(Some(XmlContent::Element(XmlElement::new(
+            "$ROOT$".to_string(),
+            HashMap::new(),
+        ))));
+        let base_root = new_base_node(Some(XmlContent::Element(XmlElement::new(
+            "root".to_string(),
+            HashMap::new(),
+        ))));
+        NodeInner::add_child_to_ref(&base, base_root);
+
+        // Branch: $ROOT$ -> PI + root element
+        let branch = new_branch_node(Some(XmlContent::Element(XmlElement::new(
+            "$ROOT$".to_string(),
+            HashMap::new(),
+        ))));
+        let pi = new_branch_node(Some(XmlContent::ProcessingInstruction(
+            XmlProcessingInstruction::new("my-pi", "some data"),
+        )));
+        NodeInner::add_child_to_ref(&branch, pi);
+        let branch_root = new_branch_node(Some(XmlContent::Element(XmlElement::new(
+            "root".to_string(),
+            HashMap::new(),
+        ))));
+        NodeInner::add_child_to_ref(&branch, branch_root);
+
+        let mut matching = HeuristicMatching::new();
+        matching.build_matching(&base, &branch);
+
+        if let Some(diff) = Diff::new(&matching) {
+            let mut output = Vec::new();
+            diff.diff(&mut output).unwrap();
+
+            let result = String::from_utf8(output).unwrap();
+            assert!(
+                result.contains("<?my-pi some data?>"),
+                "Diff output should contain PI content, got: {}",
+                result
+            );
         }
     }
 }

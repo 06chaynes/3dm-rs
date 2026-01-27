@@ -615,12 +615,56 @@ impl Merge {
             self.edit_log.update(Some(a.clone()));
             a.borrow().content().cloned()
         } else if b_updated {
+            // Check if a has namespace declaration changes that need merging
+            if self.has_namespace_changes(a, base_a.as_ref()) {
+                if let Some(merged) = self.merge_elements(base_a.as_ref(), a, b) {
+                    return Some(merged);
+                }
+                // Namespace conflict
+                self.conflict_log.add_node_conflict(
+                    ConflictType::Update,
+                    "Namespace declaration conflict between branches, using branch 2",
+                    base_a,
+                    Some(a.clone()),
+                    Some(b.clone()),
+                );
+            }
             self.edit_log.update(Some(b.clone()));
             b.borrow().content().cloned()
         } else if a_updated {
+            // Check if b has namespace declaration changes that need merging
+            if self.has_namespace_changes(b, base_b.as_ref()) {
+                if let Some(merged) = self.merge_elements(base_a.as_ref(), a, b) {
+                    return Some(merged);
+                }
+                // Namespace conflict
+                self.conflict_log.add_node_conflict(
+                    ConflictType::Update,
+                    "Namespace declaration conflict between branches, using branch 1",
+                    base_a,
+                    Some(a.clone()),
+                    Some(b.clone()),
+                );
+            }
             self.edit_log.update(Some(a.clone()));
             a.borrow().content().cloned()
         } else {
+            // Neither content updated, but check for namespace-only changes
+            if self.has_namespace_changes(a, base_a.as_ref())
+                || self.has_namespace_changes(b, base_b.as_ref())
+            {
+                if let Some(merged) = self.merge_elements(base_a.as_ref(), a, b) {
+                    return Some(merged);
+                }
+                // Namespace conflict
+                self.conflict_log.add_node_conflict(
+                    ConflictType::Update,
+                    "Namespace declaration conflict between branches, using branch 1",
+                    base_a.clone(),
+                    Some(a.clone()),
+                    Some(b.clone()),
+                );
+            }
             a.borrow().content().cloned()
         }
     }
@@ -643,9 +687,9 @@ impl Merge {
                 Some(XmlContent::Element(b_elem)),
             ) => {
                 // Determine tag name
-                let tag_name = if base_elem.qname() == b_elem.qname() {
+                let tag_name = if base_elem.names_match(b_elem) {
                     a_elem.qname().to_string()
-                } else if base_elem.qname() == a_elem.qname() {
+                } else if base_elem.names_match(a_elem) {
                     b_elem.qname().to_string()
                 } else {
                     return None; // Both changed tag name
@@ -657,7 +701,25 @@ impl Merge {
                     a_elem.attributes(),
                     b_elem.attributes(),
                 )
-                .map(|merged_attrs| XmlContent::Element(XmlElement::new(tag_name, merged_attrs)))
+                .and_then(|merged_attrs| {
+                    let merged_ns = self.merge_namespace_decls(
+                        base_elem.namespace_decls(),
+                        a_elem.namespace_decls(),
+                        b_elem.namespace_decls(),
+                    )?;
+                    // Use the winning element's expanded name
+                    let expanded = if base_elem.names_match(b_elem) {
+                        a_elem.expanded_name().cloned()
+                    } else {
+                        b_elem.expanded_name().cloned()
+                    };
+                    Some(XmlContent::Element(XmlElement::new_with_namespace(
+                        tag_name,
+                        expanded,
+                        merged_ns,
+                        merged_attrs,
+                    )))
+                })
             }
             _ => None,
         }
@@ -724,6 +786,63 @@ impl Merge {
         Some(merged)
     }
 
+    /// Merges namespace declarations from base, a, and b using 3-way merge.
+    /// Returns None on conflict (deleted in one branch, changed in the other).
+    fn merge_namespace_decls(
+        &self,
+        base: &std::collections::HashMap<String, String>,
+        a: &std::collections::HashMap<String, String>,
+        b: &std::collections::HashMap<String, String>,
+    ) -> Option<std::collections::HashMap<String, String>> {
+        let mut merged = std::collections::HashMap::new();
+        let mut deletia = std::collections::HashSet::new();
+
+        // Detect deletions and deletion-vs-change conflicts
+        for (prefix, base_uri) in base {
+            let in_a = a.get(prefix);
+            let in_b = b.get(prefix);
+
+            match (in_a, in_b) {
+                (None, Some(b_uri)) if base_uri != b_uri => return None,
+                (Some(a_uri), None) if base_uri != a_uri => return None,
+                (None, _) | (_, None) => {
+                    deletia.insert(prefix.clone());
+                }
+                _ => {}
+            }
+        }
+
+        // Build merged from a
+        for (prefix, a_uri) in a {
+            if deletia.contains(prefix) {
+                continue;
+            }
+            if let Some(b_uri) = b.get(prefix) {
+                let base_uri = base.get(prefix);
+                if base_uri == Some(b_uri) {
+                    merged.insert(prefix.clone(), a_uri.clone());
+                } else if base_uri == Some(a_uri) {
+                    merged.insert(prefix.clone(), b_uri.clone());
+                } else if a_uri != b_uri {
+                    return None;
+                } else {
+                    merged.insert(prefix.clone(), a_uri.clone());
+                }
+            } else {
+                merged.insert(prefix.clone(), a_uri.clone());
+            }
+        }
+
+        // Add new declarations from b
+        for (prefix, b_uri) in b {
+            if !deletia.contains(prefix) && !a.contains_key(prefix) {
+                merged.insert(prefix.clone(), b_uri.clone());
+            }
+        }
+
+        Some(merged)
+    }
+
     /// Gets partners for recursion.
     fn get_recursion_partners(&self, pair: &MergePair) -> RecursionPartners {
         let n1 = pair.first.as_ref();
@@ -760,6 +879,19 @@ impl Merge {
                     }
                 }
             }
+        }
+    }
+
+    /// Checks if a node has namespace declaration changes relative to its base.
+    fn has_namespace_changes(&self, node: &NodeRef, base: Option<&NodeRef>) -> bool {
+        let Some(base) = base else { return false };
+        let node_borrowed = node.borrow();
+        let base_borrowed = base.borrow();
+        match (node_borrowed.content(), base_borrowed.content()) {
+            (Some(XmlContent::Element(ne)), Some(XmlContent::Element(be))) => {
+                !ne.namespace_decls_equal(be)
+            }
+            _ => false,
         }
     }
 
@@ -932,5 +1064,132 @@ impl crate::node::NodeInner {
         } else {
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::matching::TriMatching;
+    use crate::xml::{BaseNodeFactory, BranchNodeFactory, XmlParser};
+    use std::collections::HashMap;
+
+    /// Helper: run a 3-way merge from XML strings, return (output_xml, conflict_count).
+    fn merge_xml(base: &str, a: &str, b: &str) -> (String, usize) {
+        let base_tree = XmlParser::new(BaseNodeFactory)
+            .parse_str(base)
+            .expect("parse base");
+        let a_tree = XmlParser::new(BranchNodeFactory)
+            .parse_str(a)
+            .expect("parse a");
+        let b_tree = XmlParser::new(BranchNodeFactory)
+            .parse_str(b)
+            .expect("parse b");
+        let matching = TriMatching::new(a_tree, base_tree, b_tree);
+        let mut merge = Merge::new(matching);
+        let mut output = Vec::new();
+        merge.merge(&mut output).expect("merge");
+        let conflicts = merge.conflict_log.conflicts().len();
+        (String::from_utf8(output).expect("utf8"), conflicts)
+    }
+
+    #[test]
+    fn test_merge_namespace_decls_deletion() {
+        // Branch B removes xmlns:foo, A unchanged
+        let base = r#"<?xml version="1.0"?><root xmlns:foo="http://foo.com" xmlns:bar="http://bar.com"><child/></root>"#;
+        let a = base;
+        let b = r#"<?xml version="1.0"?><root xmlns:bar="http://bar.com"><child/></root>"#;
+        let (output, conflicts) = merge_xml(base, a, b);
+        assert!(!output.contains("xmlns:foo"), "xmlns:foo should be removed");
+        assert!(output.contains("xmlns:bar"), "xmlns:bar should remain");
+        assert_eq!(conflicts, 0);
+    }
+
+    #[test]
+    fn test_merge_namespace_decls_addition() {
+        // A adds xmlns:b, B adds xmlns:c
+        let base = r#"<?xml version="1.0"?><root xmlns:a="http://a.com"><child/></root>"#;
+        let a = r#"<?xml version="1.0"?><root xmlns:a="http://a.com" xmlns:b="http://b.com"><child/></root>"#;
+        let b = r#"<?xml version="1.0"?><root xmlns:a="http://a.com" xmlns:c="http://c.com"><child/></root>"#;
+        let (output, conflicts) = merge_xml(base, a, b);
+        assert!(output.contains("xmlns:b"), "xmlns:b should be present");
+        assert!(output.contains("xmlns:c"), "xmlns:c should be present");
+        assert_eq!(conflicts, 0);
+    }
+
+    #[test]
+    fn test_merge_namespace_decls_delete_vs_change_conflict() {
+        // A deletes xmlns:foo, B changes its URI → conflict
+        let base = r#"<?xml version="1.0"?><root xmlns:foo="http://foo.com" xmlns:bar="http://bar.com"><child/></root>"#;
+        let a = r#"<?xml version="1.0"?><root xmlns:bar="http://bar.com"><child/></root>"#;
+        let b = r#"<?xml version="1.0"?><root xmlns:foo="http://foo-v2.com" xmlns:bar="http://bar.com"><child/></root>"#;
+        let (_output, conflicts) = merge_xml(base, a, b);
+        assert_eq!(conflicts, 1, "delete-vs-change should produce a conflict");
+    }
+
+    #[test]
+    fn test_merge_namespace_decls_both_change_same_prefix_conflict() {
+        // A and B both change xmlns:foo to different URIs → conflict
+        let base = r#"<?xml version="1.0"?><root xmlns:foo="http://foo.com"><child/></root>"#;
+        let a = r#"<?xml version="1.0"?><root xmlns:foo="http://foo-a.com"><child/></root>"#;
+        let b = r#"<?xml version="1.0"?><root xmlns:foo="http://foo-b.com"><child/></root>"#;
+        let (_output, conflicts) = merge_xml(base, a, b);
+        assert_eq!(
+            conflicts, 1,
+            "both changing same prefix differently should conflict"
+        );
+    }
+
+    #[test]
+    fn test_merge_namespace_decls_both_change_same_value() {
+        // A and B both change xmlns:foo to the SAME URI → no conflict
+        let base = r#"<?xml version="1.0"?><root xmlns:foo="http://foo.com"><child/></root>"#;
+        let a = r#"<?xml version="1.0"?><root xmlns:foo="http://foo-v2.com"><child/></root>"#;
+        let b = r#"<?xml version="1.0"?><root xmlns:foo="http://foo-v2.com"><child/></root>"#;
+        let (output, conflicts) = merge_xml(base, a, b);
+        assert!(
+            output.contains("http://foo-v2.com"),
+            "merged URI should be the new value"
+        );
+        assert_eq!(conflicts, 0);
+    }
+
+    #[test]
+    fn test_merge_namespace_decls_unit() {
+        // Direct unit test of merge_namespace_decls
+        let matching = {
+            let base = XmlParser::new(BaseNodeFactory)
+                .parse_str("<root/>")
+                .unwrap();
+            let a = XmlParser::new(BranchNodeFactory)
+                .parse_str("<root/>")
+                .unwrap();
+            let b = XmlParser::new(BranchNodeFactory)
+                .parse_str("<root/>")
+                .unwrap();
+            TriMatching::new(a, base, b)
+        };
+        let merge = Merge::new(matching);
+
+        let mut base = HashMap::new();
+        base.insert("foo".into(), "http://foo.com".into());
+        base.insert("bar".into(), "http://bar.com".into());
+
+        // Deletion: a removes foo
+        let mut a = HashMap::new();
+        a.insert("bar".into(), "http://bar.com".into());
+        let b = base.clone();
+
+        let result = merge.merge_namespace_decls(&base, &a, &b).unwrap();
+        assert!(!result.contains_key("foo"));
+        assert!(result.contains_key("bar"));
+
+        // Conflict: a removes foo, b changes foo
+        let mut b_changed = HashMap::new();
+        b_changed.insert("foo".into(), "http://foo-v2.com".into());
+        b_changed.insert("bar".into(), "http://bar.com".into());
+
+        let result = merge.merge_namespace_decls(&base, &a, &b_changed);
+        assert!(result.is_none(), "delete-vs-change should return None");
     }
 }

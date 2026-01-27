@@ -16,6 +16,9 @@ A Rust implementation of the 3DM (3-way Diff/Merge) algorithm for XML document p
 - Copy detection: Identifies and encodes duplicated subtrees
 - Conflict resolution: Provides conflict and warning logs with document paths
 - Comment preservation: XML comments are preserved through all operations
+- Processing instruction support: PIs preserved through all operations
+- Namespace awareness: Elements compared by expanded name (URI + local name)
+- Whitespace preservation: Honors `xml:space="preserve"` attribute
 - Formatted output: Proper indentation with 2 spaces per level
 
 ## Quick Start
@@ -114,8 +117,10 @@ The paragraph is both moved and corrected in the merged output.
 
 - Formatted XML: Indented with 2 spaces per level
 - Comment preservation: XML comments are maintained
+- Processing instructions: PIs like `<?xml-stylesheet?>` are preserved
+- Namespace declarations: `xmlns` attributes tracked and output correctly
 - Entity encoding: Proper escaping of special characters
-- Deterministic output: Consistent attribute ordering
+- Deterministic output: Consistent attribute and namespace ordering
 
 ### Error Handling
 
@@ -194,9 +199,7 @@ driver = tdm merge --pretty %O %A %B %A
 
 ## Limitations
 
-- No namespace awareness: Namespaces treated as part of element names
-- Whitespace normalization: Consecutive whitespace collapsed to single space
-- Processing instructions: Not preserved (comments are preserved)
+- Attribute namespaces: Attributes stored by qualified name; full expanded-name comparison for attributes is not yet implemented
 - Well-formed XML only: Does not handle malformed documents
 
 ## License

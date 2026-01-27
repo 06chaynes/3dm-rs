@@ -120,7 +120,7 @@ impl Measure {
             (Some(XmlContent::Element(ea)), Some(XmlContent::Element(eb))) => {
                 // Compare element names
                 self.total += ELEMENT_NAME_INFO;
-                if ea.qname() != eb.qname() {
+                if !ea.names_match(eb) {
                     self.mismatched += ELEMENT_NAME_INFO;
                 }
 
@@ -165,6 +165,16 @@ impl Measure {
 
                 self.mismatched += if amismatch > info { info } else { amismatch };
                 self.total += info;
+            }
+            (
+                Some(XmlContent::ProcessingInstruction(pa)),
+                Some(XmlContent::ProcessingInstruction(pb)),
+            ) => {
+                // Compare processing instructions
+                self.total += 1;
+                if pa.target() != pb.target() || !pa.content_equals(pb) {
+                    self.mismatched += 1;
+                }
             }
             _ => {
                 // Incompatible types (element vs text, or missing content)

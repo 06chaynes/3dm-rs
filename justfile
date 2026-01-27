@@ -11,11 +11,11 @@ fmt-check:
     cargo fmt --all -- --check
 
 # Run clippy on all targets
-clippy:
+lint:
     cargo clippy --all-targets --all-features -- -D warnings
 
 # Run clippy with fixes
-clippy-fix:
+lint-fix:
     cargo clippy --all-targets --all-features --fix --allow-dirty --allow-staged
 
 # Run tests for the library
@@ -31,10 +31,10 @@ test:
     cargo test --all
 
 # Run all checks (format, clippy, tests)
-check: fmt-check clippy test
+check: fmt-check lint test
 
 # Run all checks and fixes
-fix: fmt clippy-fix test
+fix: fmt lint-fix test
 
 # Build the project
 build:

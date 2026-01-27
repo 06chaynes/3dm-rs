@@ -76,12 +76,42 @@ impl<W: Write> XmlPrinter<W> {
                 self.characters(&text_str)?;
             }
             Some(XmlContent::Comment(comment)) => {
+                // Close previous unclosed tag if needed
+                if !self.has_content {
+                    self.print_with_nl(">")?;
+                    self.has_content = true;
+                }
+
                 let comment_text: String = comment.text().iter().collect();
                 self.print_with_nl(&format!(
                     "{}<!-- {} -->",
                     Self::indent_str(self.indent),
                     comment_text
                 ))?;
+                self.state = PrintState::AfterTag;
+            }
+            Some(XmlContent::ProcessingInstruction(pi)) => {
+                // Close previous unclosed tag if needed
+                if !self.has_content {
+                    self.print_with_nl(">")?;
+                    self.has_content = true;
+                }
+
+                if pi.content().is_empty() {
+                    self.print_with_nl(&format!(
+                        "{}<?{}?>",
+                        Self::indent_str(self.indent),
+                        pi.target()
+                    ))?;
+                } else {
+                    self.print_with_nl(&format!(
+                        "{}<?{} {}?>",
+                        Self::indent_str(self.indent),
+                        pi.target(),
+                        pi.content()
+                    ))?;
+                }
+                self.state = PrintState::AfterTag;
             }
             Some(XmlContent::Element(element)) => {
                 let qname = element.qname();
@@ -92,7 +122,7 @@ impl<W: Write> XmlPrinter<W> {
                         self.print_node(child, true)?;
                     }
                 } else {
-                    self.start_element(qname, element.attributes())?;
+                    self.start_element(qname, element.namespace_decls(), element.attributes())?;
 
                     for child in borrowed.children() {
                         self.print_node(child, true)?;
@@ -131,6 +161,7 @@ impl<W: Write> XmlPrinter<W> {
     fn start_element(
         &mut self,
         qname: &str,
+        ns_decls: &std::collections::HashMap<String, String>,
         attrs: &std::collections::HashMap<String, String>,
     ) -> std::io::Result<()> {
         // Close previous unclosed tag if needed
@@ -148,6 +179,23 @@ impl<W: Write> XmlPrinter<W> {
         let mut tag = String::new();
         tag.push('<');
         tag.push_str(qname);
+
+        // Add namespace declarations (sorted for deterministic output)
+        let mut ns_prefixes: Vec<&String> = ns_decls.keys().collect();
+        ns_prefixes.sort();
+        for prefix in ns_prefixes {
+            let uri = &ns_decls[prefix];
+            tag.push(' ');
+            if prefix.is_empty() {
+                tag.push_str("xmlns");
+            } else {
+                tag.push_str("xmlns:");
+                tag.push_str(prefix);
+            }
+            tag.push_str("=\"");
+            tag.push_str(&to_entities(uri));
+            tag.push('"');
+        }
 
         // Add attributes (sorted for deterministic output)
         let mut attr_names: Vec<&String> = attrs.keys().collect();
@@ -469,5 +517,54 @@ mod tests {
 
         // The second print should produce identical output
         assert_eq!(output1, output2);
+    }
+
+    #[test]
+    fn test_round_trip_namespace_declarations() {
+        let xml = r#"<root xmlns="http://example.com" xmlns:ns="http://ns.example.com"><ns:child /></root>"#;
+        let tree1 = parse_str(xml).unwrap();
+        let output1 = print_to_string(&tree1).unwrap();
+
+        // Namespace declarations should appear in output
+        assert!(output1.contains("xmlns="));
+        assert!(output1.contains("xmlns:ns="));
+
+        // Double round-trip should be stable
+        let tree2 = parse_str(&output1).unwrap();
+        let output2 = print_to_string(&tree2).unwrap();
+        assert_eq!(output1, output2);
+    }
+
+    #[test]
+    fn test_round_trip_processing_instruction() {
+        let xml = r#"<root><?target data?></root>"#;
+        let tree1 = parse_str(xml).unwrap();
+        let output1 = print_to_string(&tree1).unwrap();
+
+        assert!(output1.contains("<?target data?>"));
+
+        let tree2 = parse_str(&output1).unwrap();
+        let output2 = print_to_string(&tree2).unwrap();
+        assert_eq!(output1, output2);
+    }
+
+    #[test]
+    fn test_comment_with_adjacent_text() {
+        // Verify text nodes are correctly flushed before comments
+        let xml = r#"<root>hello<!-- comment -->world</root>"#;
+        let tree1 = parse_str(xml).unwrap();
+        let output1 = print_to_string(&tree1).unwrap();
+
+        // Text and comment should both be present and in correct order
+        assert!(output1.contains("hello"));
+        assert!(output1.contains("comment"));
+        assert!(output1.contains("world"));
+
+        // Verify ordering: hello before comment, comment before world
+        let hello_pos = output1.find("hello").unwrap();
+        let comment_pos = output1.find("comment").unwrap();
+        let world_pos = output1.find("world").unwrap();
+        assert!(hello_pos < comment_pos);
+        assert!(comment_pos < world_pos);
     }
 }

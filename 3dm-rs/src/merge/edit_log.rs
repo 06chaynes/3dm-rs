@@ -233,6 +233,7 @@ fn get_node_path(node: &NodeRef) -> String {
             Some(XmlContent::Element(e)) => e.qname().to_string(),
             Some(XmlContent::Text(_)) => "#text".to_string(),
             Some(XmlContent::Comment(_)) => "#comment".to_string(),
+            Some(XmlContent::ProcessingInstruction(pi)) => format!("#pi-{}", pi.target()),
             None => "#node".to_string(),
         };
 
