@@ -48,6 +48,18 @@ build-release:
 clean:
     cargo clean
 
+# Release a new version (usage: just release patch|minor|major)
+release LEVEL:
+    cargo release {{LEVEL}} --execute
+
+# Preview what a release would do without making changes
+release-dry-run LEVEL:
+    cargo release {{LEVEL}}
+
+# Verify dist configuration
+dist-plan:
+    cargo dist plan
+
 # Build all examples
 build-examples:
     cargo build --examples --package xml-3dm
