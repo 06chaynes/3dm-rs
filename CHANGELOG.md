@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.6] - 2026-01-27
+
+### Fixed
+
+- **Diff generation for sibling changes**: Fixed `get_area_stop_nodes` in `DiffMatching` which returned early after the first matched child, silently dropping all subsequent siblings from the diff output. Diffs involving changes after the first matched child element now produce correct output.
+
+- **Debug-mode panic in content hashing**: Fixed integer overflow in `hash_to_i32` that panicked in debug builds for ~0.2% of MD5 hash inputs. Now uses `wrapping_add` to match Java's two's-complement semantics.
+
 ## [0.1.5] - 2026-01-27
 
 ### Added

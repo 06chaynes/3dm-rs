@@ -161,7 +161,9 @@ fn hash_to_i32(hash: &[u8; 16]) -> i32 {
     let b1 = hash[1] as i8 as i32;
     let b2 = hash[2] as i8 as i32;
     let b3 = hash[3] as i8 as i32;
-    b0 + (b1 << 8) + (b2 << 16) + (b3 << 24)
+    b0.wrapping_add(b1 << 8)
+        .wrapping_add(b2 << 16)
+        .wrapping_add(b3 << 24)
 }
 
 /// An XML element with a qualified name and attributes.

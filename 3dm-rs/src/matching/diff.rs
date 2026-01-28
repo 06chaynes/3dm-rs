@@ -243,7 +243,6 @@ impl Matching for DiffMatching {
                 stop_nodes.push(child.clone());
             } else {
                 self.get_area_stop_nodes(stop_nodes, child);
-                return;
             }
         }
     }
@@ -350,5 +349,62 @@ mod tests {
             .and_then(|w| w.upgrade());
         assert!(match2.is_some());
         assert_eq!(match2.unwrap().borrow().id(), base_a2.borrow().id());
+    }
+
+    #[test]
+    fn test_get_area_stop_nodes_all_siblings() {
+        // Regression: get_area_stop_nodes must visit ALL children, not return
+        // after the first matched child.
+        // Base:   <root><a/><b/><c/></root>
+        // Branch: <root><a/><x/><c/></root>
+        // After matching, a and c are matched, x is unmatched.
+        // Stop nodes from root should include: x (unmatched) and nothing else
+        // (a and c are matched leaves with no children, so recursing into them yields nothing).
+        // Previously the return bug would only recurse into a and then stop.
+
+        let base_root = new_base_node(Some(make_element("root")));
+        let base_a = new_base_node(Some(make_element("a")));
+        let base_b = new_base_node(Some(make_element("b")));
+        let base_c = new_base_node(Some(make_element("c")));
+        NodeInner::add_child_to_ref(&base_root, base_a.clone());
+        NodeInner::add_child_to_ref(&base_root, base_b.clone());
+        NodeInner::add_child_to_ref(&base_root, base_c.clone());
+
+        let branch_root = new_branch_node(Some(make_element("root")));
+        let branch_a = new_branch_node(Some(make_element("a")));
+        let branch_x = new_branch_node(Some(make_element("x"))); // unmatched
+        let branch_c = new_branch_node(Some(make_element("c")));
+        NodeInner::add_child_to_ref(&branch_root, branch_a.clone());
+        NodeInner::add_child_to_ref(&branch_root, branch_x.clone());
+        NodeInner::add_child_to_ref(&branch_root, branch_c.clone());
+
+        let mut matching = DiffMatching::new();
+        matching.build_matching(&base_root, &branch_root);
+
+        // a and c should be matched
+        assert!(
+            branch_a.borrow().get_base_match().is_some(),
+            "a should match"
+        );
+        assert!(
+            branch_c.borrow().get_base_match().is_some(),
+            "c should match"
+        );
+        assert!(
+            branch_x.borrow().get_base_match().is_none(),
+            "x should not match"
+        );
+
+        // get_area_stop_nodes on root should find x as a stop node
+        let mut stop_nodes = Vec::new();
+        matching.get_area_stop_nodes(&mut stop_nodes, &branch_root);
+
+        // x must be in stop nodes (this failed before the fix)
+        let stop_ids: Vec<_> = stop_nodes.iter().map(|n| n.borrow().id()).collect();
+        assert!(
+            stop_ids.contains(&branch_x.borrow().id()),
+            "unmatched sibling x must appear in stop nodes, got {:?}",
+            stop_ids
+        );
     }
 }
