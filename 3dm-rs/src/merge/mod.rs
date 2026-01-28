@@ -384,6 +384,20 @@ impl Merge {
                             }
                         }
                         self.edit_log.delete(Some(bn.clone()));
+
+                        // Check if the deleted entry was locked (involved in
+                        // a move or copy) — thesis section 7.1.2
+                        if let Some(entry) = ml1.entry(ix) {
+                            if entry.locked {
+                                self.conflict_log.add_list_conflict(
+                                    ConflictType::Delete,
+                                    "Moved or copied node deleted",
+                                    Some(bn.clone()),
+                                    entry.node(),
+                                    None,
+                                );
+                            }
+                        }
                     }
 
                     // Move hangons to predecessor
@@ -479,7 +493,10 @@ impl Merge {
     }
 
     /// Checks if a deleted subtree has modifications.
-    fn is_deletia_modified(&self, n: &NodeRef, ml: &MergeList) -> bool {
+    ///
+    /// Recursively checks children with per-level merge lists, matching the
+    /// thesis algorithm (Section 7.1.1, Listing 5).
+    fn is_deletia_modified(&mut self, n: &NodeRef, ml: &MergeList) -> bool {
         let base_match = BranchNode::base_match(n);
         if base_match.is_none() {
             return true; // Inserted node
@@ -500,11 +517,11 @@ impl Merge {
                 if !self.matches(n, &base_match) {
                     return true; // Updated
                 }
-                // Check children recursively
+                // Recursively check children with a child-level merge list
+                let child_ml = self.make_merge_list(n);
                 for i in 0..n.borrow().child_count() {
                     if let Some(child) = n.borrow().child(i).cloned() {
-                        // Would need child's merge list - simplify for now
-                        if BranchNode::base_match_type(&child) != MatchType::FULL {
+                        if self.is_deletia_modified(&child, &child_ml) {
                             return true;
                         }
                     }

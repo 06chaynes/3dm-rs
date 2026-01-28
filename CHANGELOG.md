@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Recursive deletia modification check**: `is_deletia_modified` now recursively traverses the full subtree with per-level merge lists. Previously only checked immediate children, missing modifications deeper in deleted subtrees.
+
+- **Patch text content corruption**: `dump_tree` in the patch applicator no longer injects indentation whitespace into text node content. Text nodes are now written verbatim, preserving document fidelity.
+
+- **Locked-node deletion conflict**: Deleting a node that is locked (involved in a move or copy operation) now correctly raises a conflict.
+
+- **Silent patch failures on malformed diffs**: BFS index lookup failures during copy-run processing and missing `dst` attributes in diff commands now return proper errors instead of silently producing corrupt output.
+
+- **Over-escaping of `<diff>` elements**: User XML elements named `diff` are no longer wrapped in `<esc>` tags. The reserved set is now `{copy, insert, esc}` only, matching the thesis specification.
+
 - **Diff generation for sibling changes**: Fixed `get_area_stop_nodes` in `DiffMatching` which returned early after the first matched child, silently dropping all subsequent siblings from the diff output. Diffs involving changes after the first matched child element now produce correct output.
 
 - **Debug-mode panic in content hashing**: Fixed integer overflow in `hash_to_i32` that panicked in debug builds for ~0.2% of MD5 hash inputs. Now uses `wrapping_add` to match Java's two's-complement semantics.

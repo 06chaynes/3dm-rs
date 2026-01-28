@@ -230,15 +230,17 @@ impl Patch {
                     _ => None,
                 };
 
-                if let Some(dst_str) = dst_str {
-                    let stop_node = index.lookup_str(&dst_str).ok_or_else(|| {
-                        Error::Parse(format!("Invalid dst in command: {}", dst_str))
-                    })?;
+                let dst_str = dst_str.ok_or_else(|| {
+                    Error::Parse("Missing dst attribute in diff command under copy".to_string())
+                })?;
 
-                    let stop_id = stop_node.borrow().id();
-                    dst_nodes.push((stop_id, child.clone()));
-                    stop_nodes.entry(stop_id).or_insert(None);
-                }
+                let stop_node = index
+                    .lookup_str(&dst_str)
+                    .ok_or_else(|| Error::Parse(format!("Invalid dst in command: {}", dst_str)))?;
+
+                let stop_id = stop_node.borrow().id();
+                dst_nodes.push((stop_id, child.clone()));
+                stop_nodes.entry(stop_id).or_insert(None);
             }
         }
 
@@ -254,9 +256,12 @@ impl Patch {
         for _i_run in 1..run {
             self.dfs_copy(patch, &current_src, &mut HashMap::new())?;
             current_id += 1;
-            if let Some(next) = index.lookup(current_id) {
-                current_src = next;
-            }
+            current_src = index.lookup(current_id).ok_or_else(|| {
+                Error::Parse(format!(
+                    "BFS index lookup failed for id {} during copy run",
+                    current_id
+                ))
+            })?;
         }
 
         // Final copy with stop nodes
@@ -318,14 +323,10 @@ impl Patch {
 
         match borrowed.content() {
             Some(XmlContent::Text(text)) => {
-                // Convert char slice to String
+                // Text nodes are written verbatim (no indentation) to avoid
+                // corrupting text content per thesis requirement.
                 let text_str: String = text.text().iter().collect();
-                write!(
-                    writer,
-                    "{}{}",
-                    Self::indent_str_for(indent),
-                    escape_xml(&text_str)
-                )?;
+                write!(writer, "{}", escape_xml(&text_str))?;
             }
             Some(XmlContent::Comment(comment)) => {
                 // Output comment

@@ -344,10 +344,7 @@ impl<'a> Diff<'a> {
 
     /// Checks if an element name conflicts with diff reserved tags.
     fn needs_escape(qname: &str) -> bool {
-        qname == DIFF_COPY_TAG
-            || qname == DIFF_INSERT_TAG
-            || qname == DIFF_ESC_TAG
-            || qname == DIFF_ROOT_TAG
+        qname == DIFF_COPY_TAG || qname == DIFF_INSERT_TAG || qname == DIFF_ESC_TAG
     }
 
     /// Writes the opening content for a node.
